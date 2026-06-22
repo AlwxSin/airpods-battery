@@ -2,6 +2,8 @@
 
 A lightweight Linux daemon that exposes AirPods battery levels to UPower via the BlueZ BatteryProvider1 API. Once running, GNOME, KDE, and Waybar show AirPods battery the same way they show any other Bluetooth device.
 
+**Note:** UPower expects a single battery percentage per device. The daemon reports the minimum value across both earbuds — the one that will run out first. The case is excluded.
+
 Battery data is read directly from the headphones over an L2CAP connection using Apple's AAP protocol — the same approach used by [MagicPods](https://github.com/steam3d/MagicPodsLinux).
 
 ## Requirements
