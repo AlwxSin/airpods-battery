@@ -1,0 +1,13 @@
+[Unit]
+Description=AirPods battery provider for BlueZ/UPower
+After=bluetooth.service
+Wants=bluetooth.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/airpods-battery
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
