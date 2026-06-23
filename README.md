@@ -14,7 +14,7 @@ Battery data is read directly from the headphones over an L2CAP connection using
 
 ## Installation
 
-### AUR
+### AUR (currently unavailable)
 
 ```
 yay -S airpods-battery-git
