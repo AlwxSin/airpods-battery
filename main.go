@@ -135,7 +135,7 @@ func (d *daemon) updateOrAdd(addr string, pct uint8) {
 		d.addLocked(addr, pct)
 		e = d.entries[addr]
 		d.mu.Unlock()
-		d.conn.Emit(rootPath, objMgrIface+".InterfacesAdded",
+		if err := d.conn.Emit(rootPath, objMgrIface+".InterfacesAdded",
 			e.objPath,
 			map[string]map[string]dbus.Variant{
 				batteryIface: {
@@ -143,7 +143,9 @@ func (d *daemon) updateOrAdd(addr string, pct uint8) {
 					"Device":     dbus.MakeVariant(e.devicePath),
 				},
 			},
-		)
+		); err != nil {
+			log.Printf("emit InterfacesAdded %s: %v", addr, err)
+		}
 		log.Printf("added %s at %d%%", addr, pct)
 		return
 	}
@@ -153,28 +155,33 @@ func (d *daemon) updateOrAdd(addr string, pct uint8) {
 	}
 	e.percentage = pct
 	d.mu.Unlock()
-	d.conn.Emit(e.objPath, propsIface+".PropertiesChanged",
+	if err := d.conn.Emit(e.objPath, propsIface+".PropertiesChanged",
 		batteryIface,
 		map[string]dbus.Variant{"Percentage": dbus.MakeVariant(pct)},
 		[]string{},
-	)
+	); err != nil {
+		log.Printf("emit PropertiesChanged %s: %v", addr, err)
+	}
 	log.Printf("updated %s to %d%%", addr, pct)
 }
 
 func (d *daemon) removeDevice(addr string) {
 	d.mu.Lock()
-	e, ok := d.entries[addr]
-	if !ok {
-		d.mu.Unlock()
-		return
-	}
+	_, existed := d.entries[addr]
 	delete(d.entries, addr)
 	d.mu.Unlock()
-	d.conn.Emit(rootPath, objMgrIface+".InterfacesRemoved",
-		e.objPath,
+	// Emit even without a local entry: bluetoothd can silently miss a
+	// removal, and the stale battery would otherwise survive until the
+	// daemon exits.
+	if err := d.conn.Emit(rootPath, objMgrIface+".InterfacesRemoved",
+		addrToObjPath(addr),
 		[]string{batteryIface},
-	)
-	log.Printf("removed %s", addr)
+	); err != nil {
+		log.Printf("emit InterfacesRemoved %s: %v", addr, err)
+	}
+	if existed {
+		log.Printf("removed %s", addr)
+	}
 }
 
 func (d *daemon) enumerateDevices() {

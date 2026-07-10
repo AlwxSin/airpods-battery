@@ -199,17 +199,35 @@ func parseBattery(data []byte) (uint8, bool) {
 }
 
 // fdWrite writes all bytes to the file descriptor.
-func fdWrite(fd int, data []byte) {
+func fdWrite(fd int, data []byte) error {
 	for len(data) > 0 {
 		n, err := syscall.Write(fd, data)
+		if err == syscall.EINTR {
+			continue
+		}
 		if err != nil {
-			return
+			return err
 		}
 		data = data[n:]
 	}
+	return nil
 }
 
-const aapConnectAttempts = 5
+const (
+	aapConnectAttempts  = 5
+	aapHandshakeTimeout = 3 * time.Second
+	aapBatteryTimeout   = 10 * time.Second
+	aapNotifRetries     = 3
+)
+
+// setReadTimeout sets SO_RCVTIMEO on the socket; zero makes reads block
+// forever.
+func setReadTimeout(fd int, d time.Duration) {
+	tv := syscall.NsecToTimeval(d.Nanoseconds())
+	if err := syscall.SetsockoptTimeval(fd, syscall.SOL_SOCKET, syscall.SO_RCVTIMEO, &tv); err != nil {
+		log.Printf("set read timeout: %v", err)
+	}
+}
 
 // startAAP dials L2CAP, performs the AAP handshake, and starts a background
 // goroutine that calls onBattery for each battery update.
@@ -236,25 +254,82 @@ func startAAP(addr string, productID uint16, onBattery func(uint8)) (*aapSession
 	go func() {
 		defer close(s.done)
 		defer syscall.Close(fd)
+		defer log.Printf("AAP session closed for %s", addr)
 
-		fdWrite(fd, pktInit)
-		fdWrite(fd, pktNotif1)
-		fdWrite(fd, pktNotif2)
-		if initExtSupported(productID) {
-			fdWrite(fd, pktInitExt)
+		requestNotifications := func() error {
+			if err := fdWrite(fd, pktNotif1); err != nil {
+				return err
+			}
+			if err := fdWrite(fd, pktNotif2); err != nil {
+				return err
+			}
+			if initExtSupported(productID) {
+				return fdWrite(fd, pktInitExt)
+			}
+			return nil
 		}
 
 		buf := make([]byte, 1024)
-		for {
-			n, err := syscall.Read(fd, buf)
-			if err != nil || n == 0 {
-				break
-			}
+
+		// The AirPods drop packets sent while the init handshake is still
+		// being processed, which leaves the session silent forever: wait
+		// for the init response before requesting notifications.
+		if err := fdWrite(fd, pktInit); err != nil {
+			log.Printf("AAP %s: write init: %v", addr, err)
+			return
+		}
+		setReadTimeout(fd, aapHandshakeTimeout)
+		n, err := syscall.Read(fd, buf)
+		if err == nil && n > 0 {
 			if pct, ok := parseBattery(buf[:n]); ok {
 				onBattery(pct)
 			}
+		} else if err == syscall.EAGAIN {
+			log.Printf("AAP %s: no init response after %v", addr, aapHandshakeTimeout)
+		} else {
+			return
 		}
-		log.Printf("AAP session closed for %s", addr)
+
+		if err := requestNotifications(); err != nil {
+			log.Printf("AAP %s: request notifications: %v", addr, err)
+			return
+		}
+
+		// Re-request notifications while the session stays silent — the
+		// first request can still be lost right after the handshake.
+		gotBattery := false
+		retries := 0
+		setReadTimeout(fd, aapBatteryTimeout)
+		for {
+			n, err := syscall.Read(fd, buf)
+			if err == syscall.EINTR {
+				continue
+			}
+			if err == syscall.EAGAIN {
+				retries++
+				if retries > aapNotifRetries {
+					log.Printf("AAP %s: still no battery data after %d notification requests", addr, aapNotifRetries)
+					setReadTimeout(fd, 0)
+					continue
+				}
+				log.Printf("AAP %s: no battery data yet, re-requesting notifications (%d/%d)", addr, retries, aapNotifRetries)
+				if err := requestNotifications(); err != nil {
+					log.Printf("AAP %s: request notifications: %v", addr, err)
+					return
+				}
+				continue
+			}
+			if err != nil || n == 0 {
+				return
+			}
+			if pct, ok := parseBattery(buf[:n]); ok {
+				if !gotBattery {
+					gotBattery = true
+					setReadTimeout(fd, 0)
+				}
+				onBattery(pct)
+			}
+		}
 	}()
 
 	return s, nil
