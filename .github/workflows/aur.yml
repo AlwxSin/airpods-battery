@@ -1,0 +1,24 @@
+name: Publish to AUR
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - PKGBUILD
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Publish airpods-battery-git to AUR
+        uses: KSXGitHub/github-actions-deploy-aur@v4.2.0
+        with:
+          pkgname: airpods-battery-git
+          pkgbuild: ./PKGBUILD
+          commit_username: AlwxSin
+          commit_email: aleksandr.sinichkin@flant.com
+          ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          commit_message: 'Update PKGBUILD (${{ github.sha }})'

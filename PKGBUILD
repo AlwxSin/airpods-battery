@@ -1,13 +1,14 @@
 # Maintainer: Aleksandr Sinichkin <aleksandr.sinichkin@flant.com>
 pkgname=airpods-battery-git
-pkgver=r2.5b1f0b1
+pkgver=r5.c91f637
 pkgrel=1
 pkgdesc='AirPods battery daemon for Linux via BlueZ BatteryProvider1'
 arch=('x86_64')
-url='https://github.com/alwx/airpods-battery'
+url='https://github.com/AlwxSin/airpods-battery'
 license=('MIT')
 depends=('bluez' 'upower')
 makedepends=('go' 'git')
+options=('!debug')
 provides=('airpods-battery')
 conflicts=('airpods-battery')
 source=("$pkgname::git+$url.git")

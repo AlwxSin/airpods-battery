@@ -14,7 +14,7 @@ Battery data is read directly from the headphones over an L2CAP connection using
 
 ## Installation
 
-### AUR (currently unavailable)
+### AUR
 
 ```
 yay -S airpods-battery-git
@@ -29,7 +29,7 @@ systemctl --user enable --now airpods-battery
 ### Manual
 
 ```
-git clone https://github.com/alwx/airpods-battery
+git clone https://github.com/AlwxSin/airpods-battery
 cd airpods-battery
 go build -o airpods-battery .
 sudo install -Dm755 airpods-battery /usr/bin/airpods-battery
