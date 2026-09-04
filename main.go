@@ -184,6 +184,32 @@ func (d *daemon) removeDevice(addr string) {
 	}
 }
 
+func (d *daemon) register() error {
+	return d.conn.Object(bluezService, adapterPath).Call(providerMgr+".RegisterBatteryProvider", 0, rootPath).Err
+}
+
+// reregister re-attaches the provider to a freshly (re)started bluetoothd,
+// whose BatteryProviderManager starts empty. Entries without a live AAP
+// session were mirrored from the dead instance's Battery1 and are dropped;
+// its successor's signals rebuild them.
+func (d *daemon) reregister() {
+	d.mu.Lock()
+	d.aapMu.Lock()
+	for addr := range d.entries {
+		if d.aapSessions[addr] == nil {
+			delete(d.entries, addr)
+		}
+	}
+	d.aapMu.Unlock()
+	d.mu.Unlock()
+
+	if err := d.register(); err != nil {
+		// Let systemd restart us: a cold start is known to register fine.
+		log.Fatalf("re-register after bluetoothd restart: %v", err)
+	}
+	log.Printf("bluetoothd restarted, re-registered with BatteryProviderManager")
+}
+
 func (d *daemon) enumerateDevices() {
 	obj := d.conn.Object(bluezService, "/")
 	var objects map[dbus.ObjectPath]map[string]map[string]dbus.Variant
@@ -283,6 +309,10 @@ func (d *daemon) handleSignal(sig *dbus.Signal) {
 		}
 		path, _ := sig.Body[0].(dbus.ObjectPath)
 		ifaces, _ := sig.Body[1].(map[string]map[string]dbus.Variant)
+		if _, ok := ifaces[providerMgr]; ok && path == adapterPath {
+			d.reregister()
+			return
+		}
 		addr := pathToAddr(path)
 		if addr == "" {
 			return
@@ -389,8 +419,7 @@ func main() {
 
 	d.enumerateDevices()
 
-	bluezObj := conn.Object(bluezService, adapterPath)
-	if err := bluezObj.Call(providerMgr+".RegisterBatteryProvider", 0, rootPath).Err; err != nil {
+	if err := d.register(); err != nil {
 		log.Fatalf("RegisterBatteryProvider: %v", err)
 	}
 	log.Printf("registered with BlueZ BatteryProviderManager at %s", rootPath)
@@ -412,7 +441,7 @@ func main() {
 			for _, s := range sessions {
 				s.close()
 			}
-			bluezObj.Call(providerMgr+".UnregisterBatteryProvider", 0, rootPath)
+			conn.Object(bluezService, adapterPath).Call(providerMgr+".UnregisterBatteryProvider", 0, rootPath)
 			log.Printf("unregistered, exiting")
 			return
 		}
